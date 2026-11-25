@@ -207,10 +207,12 @@
               end do
 
               if((NDIM==3).or.(ISAXISYMMETRIC)) then
-                EV = (Eps(1) + Eps(2) + Eps(3) - EnhancedVolumetricStrain ) / 3.D0 ! Correction for volumetric strain ! valid for isaxisymmetric and 3D
+                EV = (1.0d0 - CalParams%StrainSmoothingStabilization) * & ! f2-fix-smoothing: keep a fraction beta of the element volumetric strain
+                     (Eps(1) + Eps(2) + Eps(3) - EnhancedVolumetricStrain ) / 3.D0 ! Correction for volumetric strain ! valid for isaxisymmetric and 3D
                 Eps(1:NPRINCIPAL) =  Eps(1:NPRINCIPAL) - EV
               else if ((NDIM==2).and.(.not.ISAXISYMMETRIC)) then
-                EV = (Eps(1) + Eps(2) - EnhancedVolumetricStrain ) / 2.D0 ! Correction for volumetric strain ! valid for 2D plane strain
+                EV = (1.0d0 - CalParams%StrainSmoothingStabilization) * & ! f2-fix-smoothing: keep a fraction beta of the element volumetric strain
+                     (Eps(1) + Eps(2) - EnhancedVolumetricStrain ) / 2.D0 ! Correction for volumetric strain ! valid for 2D plane strain
                 Eps(1:NDIM) =  Eps(1:NDIM) - EV
               else
                 call GiveError('Dimensions not correctly defined for strain smoothening')
