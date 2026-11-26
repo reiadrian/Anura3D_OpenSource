@@ -275,7 +275,7 @@ end subroutine StressSolid
             Density * DilationalWaveSpeed * ElementLMinLocal * RateVolStrainLocal
 
           if ((RateVolStrainLocal < 0.0).and.(CalParams%BulkViscosityDamping2 > 0.0)) then
-            ViscousDampingPressure = ViscousDampingPressure + &
+            ViscousDampingPressure = ViscousDampingPressure - & ! f2-fix-bv (B1): quadratic term is compressive
               Density * (CalParams%BulkViscosityDamping2 * ElementLMinLocal * RateVolStrainLocal)**2
           end if
 
