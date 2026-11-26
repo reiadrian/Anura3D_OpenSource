@@ -2804,6 +2804,8 @@
         real(REAL_TYPE) :: WaveSpeed_c1, WaveSpeed_c2, WaveSpeed_c3
         real(REAL_TYPE) :: rho_tilde, Timestep_3
         real(REAL_TYPE) :: TimeIncrementNew
+        real(REAL_TYPE) :: TimeLeftInLoadStep ! f2-fix-t5
+        integer(INTEGER_TYPE) :: NStepsLeft ! f2-fix-t5
         real(REAL_TYPE) :: Chi = 0.0
         
         !--------------------------------------------------------------------
@@ -2962,8 +2964,14 @@
         TimeIncrementNew = MinTimeStep * CourantFactor
 
         if (.not.CalParams%ApplyQuasiStatic) then
-          if ((CalParams%TotalRealTime + TimeIncrementNew)>CalParams%TotalTime) then
-            TimeIncrementNew = CalParams%TotalTime - CalParams%TotalRealTime
+          ! f2-fix-t5: split the time left in the load step into equal steps, each <= the stable one, instead of
+          ! shortening only the last step (a periodic short step can pump a high-frequency mode: T5)
+          TimeLeftInLoadStep = CalParams%TotalTime - CalParams%TotalRealTime
+          if ((TimeLeftInLoadStep > 0.0d0).and.(TimeIncrementNew > 0.0d0)) then
+            NStepsLeft = max(1, ceiling(TimeLeftInLoadStep / TimeIncrementNew - 1.0d-9))
+            TimeIncrementNew = TimeLeftInLoadStep / dble(NStepsLeft)
+          else if ((CalParams%TotalRealTime + TimeIncrementNew)>CalParams%TotalTime) then
+            TimeIncrementNew = TimeLeftInLoadStep ! as before (original code); the minimum below applies
           end if
         end if
 
