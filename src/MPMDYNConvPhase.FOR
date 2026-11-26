@@ -2842,7 +2842,8 @@
               TimeStep = ElementLMin(IEl) / MaxWaveSpeed
               
               if (CalParams%ApplyBulkViscosityDamping) then
-                Chi = CalParams%BulkViscosityDamping1 - CalParams%BulkViscosityDamping2**2 * TimeStep * RateVolStrain(IEl)
+                Chi = CalParams%BulkViscosityDamping1 - CalParams%BulkViscosityDamping2**2 * TimeStep * & ! f2-fix-bv (B2)
+                      min(RateVolStrain(IEl), 0.0d0) ! quadratic term only in compression
                 TimeStep = (sqrt(1 + Chi**2) - Chi) * TimeStep
               end if
               
@@ -2948,7 +2949,8 @@
             if (MaxWaveSpeed>(0.0)) then
                TimeStep = ElementLMin(IEl) / MaxWaveSpeed
                if (CalParams%ApplyBulkViscosityDamping) then
-                 Chi = CalParams%BulkViscosityDamping1 - CalParams%BulkViscosityDamping2**2 * TimeStep * RateVolStrain(IEl)
+                 Chi = CalParams%BulkViscosityDamping1 - CalParams%BulkViscosityDamping2**2 * TimeStep * & ! f2-fix-bv (B2)
+                       min(RateVolStrain(IEl), 0.0d0) ! quadratic term only in compression
                  TimeStep = (sqrt(1 + Chi**2) - Chi) * TimeStep
                end if
             end if
