@@ -102,13 +102,14 @@
         !  STATEV  I/O  R()  : STATE VARIABLES
  
         !---  LOCAL VARIABLES
-        DIMENSION DSIG(NTENS), SIG(NTENS), STRAINRATE(NTENS), &
-       DEVSTRAINRATE(NTENS), SIGMA(NTENS)
-        
-        LOGICAL COMPUTEPRESSURE
-        double precision:: EEL, ENU, YIELDSTRESS, VISCOSITY, BULKMODULUSLIQUID, LIQUIDPRESSURECAVITATION, ONE, TWO, G
-        double precision:: SHEARSTRESS, FAC, D1,D2
-        double precision:: VOLSTRAINRATE, VOLSTRAINRATECOMPONENT, LIQUIDPRESSURE, LIQUIDPRESSUREINCREMENT
+        ! Elasto-viscoplastic return mapping (Perzyna, n = 1). Yield criterion: sqrt(J2) <= YIELDSTRESS.
+        ! Stationary shear flow gives tau = YIELDSTRESS + VISCOSITY * shear rate, for any DTIME.
+        INTEGER :: I
+        double precision, dimension(NTENS) :: DEV ! deviatoric stress
+        double precision :: EEL, ENU, YIELDSTRESS, VISCOSITY, BULKMODULUSLIQUID, LIQUIDPRESSURECAVITATION, ONE, TWO, G
+        double precision :: D1, D2
+        double precision :: DSTRANVOL, LIQUIDPRESSURE0, LIQUIDPRESSURE
+        double precision :: QTRIAL, QRETURN, A
 
 
         EEL = PROPS(1)   
@@ -120,124 +121,45 @@
         ONE = 1.0D0
         TWO = 2.0D0
         G = EEL/(TWO*(ONE + ENU))
-      IF (NTENS == 6) THEN ! 3D  
-       SHEARSTRESS =SQRT (( (STRESS(1) + &
-                              -STRESS(2))**2 + &
-                       (STRESS(1) + &
-                           -STRESS(3))**2 + &
-                       (STRESS(2)+ &
-                           -STRESS(3))**2 ) / 3.0 + &
-                     ( STRESS(4)**2 + &
-                       STRESS(5)**2 + &
-                       STRESS(6)**2 ) * 2.0)
-      ELSE IF (NTENS == 4) THEN ! 2D
-          SHEARSTRESS =SQRT (( (STRESS(1) + &
-                -STRESS(2))**2 + &
-                (STRESS(1)+ &
-                -STRESS(3))**2 + &
-                (STRESS(2)+ &
-                -STRESS(3))**2 ) / 3.0 + &
-                ( STRESS(4)**2) * 2.0)
-      END IF    
-        
-      IF   (SHEARSTRESS.LE.SQRT(2.0)*YIELDSTRESS) THEN
-        ! CALCULATE ELASTIC STRESS INCREMENT (DSIGE = ELASTIC STIFFNESS D * STRAIN INCREMENT DEPS)
-        FAC = TWO * G / ( ONE - TWO * ENU )
-        D1 = FAC * ( ONE - ENU )
-        D2 = FAC * ENU
-        DSTRANVOL = DSTRAN(1) + DSTRAN(2) + DSTRAN(3)
-        DSIG(1) = (D1 - D2) * DSTRAN(1) + D2 * DSTRANVOL
-        DSIG(2) = (D1 - D2) * DSTRAN(2) + D2 * DSTRANVOL
-        DSIG(3) = (D1 - D2) * DSTRAN(3) + D2 * DSTRANVOL
-        DSIG(4) = G * DSTRAN(4)
-        IF (NTENS == 6) THEN
-        DSIG(5) = G * DSTRAN(5)
-        DSIG(6) = G * DSTRAN(6)
-        END IF
-        ! ELASTIC STRESS
-        SIG = STRESS + DSIG
-        
-        ! STRESS STATE PARAMETERS UPDATE
-        DO I = 1, NTENS
-          STRESS(I) = SIG(I)
-      END DO
-        
-        DDSDDE = 0.0
+
+        ! MATERIAL STIFFNESS MATRIX (ELASTIC)
+        D1 = BULKMODULUSLIQUID + 4.0D0 * G / 3.0D0
+        D2 = BULKMODULUSLIQUID - TWO * G / 3.0D0
+        DDSDDE = 0.0D0
         DDSDDE(1:3,1:3) = D2
-        DDSDDE(1,1) = D1
-        DDSDDE(2,2) = D1
-        DDSDDE(3,3) = D1
-        DDSDDE(4,4) = G
-        IF (NTENS == 6) THEN
-          DDSDDE(5,5) = G
-          DDSDDE(6,6) = G
-        END IF
-      
-        RETURN
-      ELSE
-                  
-       SIGMA = STRESS
+        DO I = 1, 3
+          DDSDDE(I,I) = D1
+        END DO
+        DO I = 4, NTENS
+          DDSDDE(I,I) = G
+        END DO
 
+        ! VOLUMETRIC PART (TENSION POSITIVE), CUT OFF AT THE CAVITATION PRESSURE.
+        ! Only the updated pressure is checked: a cavitated point can be compressed again.
+        ! The cut-off does not change the deviatoric stress.
+        DSTRANVOL = DSTRAN(1) + DSTRAN(2) + DSTRAN(3)
+        LIQUIDPRESSURE0 = (STRESS(1) + STRESS(2) + STRESS(3)) / 3.0D0
+        LIQUIDPRESSURE = MIN(LIQUIDPRESSURE0 + BULKMODULUSLIQUID * DSTRANVOL, LIQUIDPRESSURECAVITATION)
 
-                    
-          DSTRANVOL = DSTRAN(1) + DSTRAN(2) + DSTRAN(3)
-          STRAINRATE = DSTRAN / DTIME
-          
-          VOLSTRAINRATE = STRAINRATE(1) + STRAINRATE(2) + STRAINRATE(3)
-          VOLSTRAINRATECOMPONENT = VOLSTRAINRATE / 3.0
-          DEVSTRAINRATE(1:3) = STRAINRATE(1:3) - VOLSTRAINRATECOMPONENT
-          DEVSTRAINRATE(4:NTENS) = STRAINRATE(4:NTENS)
-          
-          
-          ! CONSIDER STRESS STATE OF PREVIOUS TIME STEP    
-          LIQUIDPRESSURE = (STRESS(1)+STRESS(2)+STRESS(3))/3
-          
+        ! DEVIATORIC ELASTIC PREDICTOR (DSTRAN(4:NTENS) ARE ENGINEERING SHEAR STRAINS)
+        DEV(1:3) = STRESS(1:3) - LIQUIDPRESSURE0 + TWO * G * (DSTRAN(1:3) - DSTRANVOL / 3.0D0)
+        DEV(4:NTENS) = STRESS(4:NTENS) + G * DSTRAN(4:NTENS)
+        QTRIAL = SQRT( 0.5D0 * SUM(DEV(1:3)**2) + SUM(DEV(4:NTENS)**2) ) ! sqrt(J2)
 
-     
-
-          
-
-          COMPUTEPRESSURE = (LIQUIDPRESSURE.LT.LIQUIDPRESSURECAVITATION)
-
-          
-          IF(COMPUTEPRESSURE) THEN
-             
-            LIQUIDPRESSUREINCREMENT = BULKMODULUSLIQUID  * DSTRANVOL
-
-            LIQUIDPRESSURE = LIQUIDPRESSURE + LIQUIDPRESSUREINCREMENT
-
-          
-            IF(LIQUIDPRESSURE .GT. LIQUIDPRESSURECAVITATION) THEN
-              LIQUIDPRESSURE=LIQUIDPRESSURECAVITATION
-              STRESS(1:3) = LIQUIDPRESSURE
-              STRESS(4:NTENS) = 0.0
-              RETURN
-            END IF  
-            
-            
-     
-            
-          SIGMA(1:3) = LIQUIDPRESSURE
-          SIGMA(4:NTENS) = 0.0
-          
-
-          SIGMA(1:3) = LIQUIDPRESSURE +  &
-                         TWO * VISCOSITY * DEVSTRAINRATE(1:3)
-          SIGMA(4:NTENS) = VISCOSITY * DEVSTRAINRATE(4:NTENS)
-
-          ELSE 
-            LIQUIDPRESSURE=LIQUIDPRESSURECAVITATION
-            STRESS(1:3) = LIQUIDPRESSURE
-            STRESS(4:NTENS) = 0.0
-            RETURN
-          
+        ! VISCOPLASTIC CORRECTOR: BACKWARD EULER OF (VISCOPLASTIC SHEAR RATE) = (Q - YIELDSTRESS) / VISCOSITY
+        IF (QTRIAL .GT. YIELDSTRESS) THEN
+          IF (VISCOSITY .GT. 0.0D0) THEN
+            A = G * DTIME / VISCOSITY
+            QRETURN = (QTRIAL + A * YIELDSTRESS) / (ONE + A)
+          ELSE
+            QRETURN = YIELDSTRESS ! inviscid limit
           END IF
-            
-      STRESS = SIGMA
-     
+          DEV = DEV * (QRETURN / QTRIAL)
+        END IF
 
-   
-      END IF
+        STRESS(1:3) = LIQUIDPRESSURE + DEV(1:3)
+        STRESS(4:NTENS) = DEV(4:NTENS)
+
      END SUBROUTINE UMAT     
      
     end module ModBingham 
