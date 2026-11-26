@@ -380,6 +380,7 @@
 							  BoreHoleData(MAXNUMBERSOILLAYERS,8), &
                               InitialWaterPressure, &
                               BulkViscosityDamping1, & ! bulk viscosity damping factors beta1 and beta2
+                              StrainSmoothingStabilization, & ! f2-fix-smoothing: fraction beta of the element volumetric strain kept (0 = full smoothing, 1 = no smoothing)
                               BulkViscosityDamping2, &
                               MinimumDeterminantRatio, &
                               ShrinkageMateriaPointPositionFactor, &
@@ -778,6 +779,7 @@
         CalParams%BoreHoleData= 0.0
         CalParams%InitialWaterPressure = 0.0
         CalParams%BulkViscosityDamping1 = 0.0
+        CalParams%StrainSmoothingStabilization = 0.0
         CalParams%BulkViscosityDamping2 = 0.0
         CalParams%MinimumDeterminantRatio = 0.75
         CalParams%ShrinkageMateriaPointPositionFactor = 0.0
@@ -1634,6 +1636,13 @@
               call Assert( ios == 0, messageIOS//trim(BName) )
               call Assert( DumI(1) == 0 .or. DumI(1) == 1, 'CPS file: ' //trim(BName)// ' must be 0 or 1.' )
               if ( DumI(1) == 1 ) CalParams%ApplyStrainSmoothing = .true.
+
+            ! STRAIN SMOOTHING STABILIZATION (f2-fix-smoothing): eps_v = eps_v,smoothed + beta*(eps_v,element - eps_v,smoothed)
+            else if (trim(BName)=='$$STRAIN_SMOOTHING_STABILIZATION') then ! R [ 0.0, 1.0 ]
+              read(FileUnit, *, iostat=ios) DumR(1)
+              call Assert( ios == 0, messageIOS//trim(BName) )
+              call Assert( DumR(1) >= 0.0 .and. DumR(1) <= 1.0, 'CPS file: ' //trim(BName)// ' must be between 0 and 1.' )
+              CalParams%StrainSmoothingStabilization = DumR(1)
               
             ! DOUBLE-POINT FORMULATION  
             ! STRAIN SMOOTHING LIQUID 2 LAYER FORM
@@ -3088,6 +3097,7 @@ subroutine ReadPrescribedAccelerationOrVelocityFromFile()
 
           ! STRAIN SMOOTHING
           call WriteLogic(FileUnit, '$$STRAIN_SMOOTHING', [CalParams%ApplyStrainSmoothing], 1, .true.)
+          call WriteReal(FileUnit, '$$STRAIN_SMOOTHING_STABILIZATION', [CalParams%StrainSmoothingStabilization], 1, CalParams%StrainSmoothingStabilization > 0.0)
           
           ! DOUBLE POINT :: STRAIN SMOOTHING LIQUID 
           call WriteLogic(FileUnit, '$$APPLY_STRAIN_SMOOTHING_LIQUID_TWOLAYERFORM', [CalParams%ApplyStrainSmoothingLiquidTwoLayer], 1, .true.)
